@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Boris vs. Galih Basketball</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: #07131d; color: white; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { display: flex; justify-content: center; padding: 16px; overflow-x: hidden; }
+    .wrap { width: min(1100px, 100%); }
+    h1 { margin: 0 0 8px; font-size: clamp(26px, 4vw, 46px); letter-spacing: -1px; }
+    .subtitle { margin: 0 0 12px; color: #c9e6ff; }
+    .panel {
+      background: linear-gradient(135deg, rgba(16,34,52,.92), rgba(18,24,38,.92));
+      border: 1px solid rgba(127, 205, 255, .25);
+      border-radius: 18px;
+      padding: 14px;
+      margin-bottom: 12px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.3);
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    label { color: #dcefff; font-weight: 700; }
+    input {
+      background: #06101a; color: #fff; border: 1px solid #31516b; border-radius: 12px;
+      padding: 10px 12px; min-width: 210px; font-size: 16px; outline: none;
+    }
+    input:focus { border-color: #77d6ff; }
+    button {
+      border: 0; border-radius: 12px; padding: 11px 15px; font-weight: 900; cursor: pointer;
+      background: linear-gradient(180deg, #ffd45a, #f5a623); color: #211306;
+      box-shadow: 0 5px 0 #9c5e08, 0 10px 24px rgba(0,0,0,.25);
+      transform: translateY(0); transition: transform .12s ease, filter .12s ease;
+    }
+    button:hover { filter: brightness(1.07); transform: translateY(-1px); }
+    button:active { transform: translateY(3px); box-shadow: 0 2px 0 #9c5e08; }
+    button.secondary { background: linear-gradient(180deg, #eaf7ff, #9ddcff); color: #07243a; box-shadow: 0 5px 0 #39799a, 0 10px 24px rgba(0,0,0,.25); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    #status { color: #e9f8ff; min-height: 24px; margin-top: 9px; }
+    .small { font-size: 14px; color: #bcd4e6; line-height: 1.45; margin-top: 8px; }
+    .gameArea { position: relative; }
+    canvas {
+      width: 100%; max-width: 1080px; aspect-ratio: 1080 / 650; display: block;
+      border-radius: 22px; border: 4px solid #071018;
+      background: #b96b36; box-shadow: 0 24px 80px rgba(0,0,0,.45), inset 0 0 0 2px rgba(255,255,255,.12);
+      image-rendering: auto;
+    }
+    .overlay {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      flex-direction: column; text-align: center; border-radius: 22px; pointer-events: none;
+      opacity: 0; transition: opacity .45s ease; background: radial-gradient(circle at center, rgba(0,0,0,.42), rgba(0,0,0,.75));
+    }
+    .overlay.show { opacity: 1; pointer-events: auto; }
+    .winnerText { font-size: clamp(44px, 8vw, 92px); font-weight: 1000; letter-spacing: 1px; text-shadow: 0 7px 0 #000, 0 0 30px rgba(255, 210, 71, .55); }
+    .winnerSub { margin: 8px 0 18px; font-size: clamp(17px, 2.5vw, 26px); color: #dff6ff; }
+    .hudHint { position: absolute; left: 18px; bottom: 14px; color: rgba(255,255,255,.78); font-size: 13px; text-shadow: 0 2px 4px #000; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <h1>Boris vs. Galih Basketball</h1>
+    <p class="subtitle">Three balls. One real target. A lollipop power-up. First player to catch the correct basketball wins.</p>
+    <section class="panel">
+      <div class="row">
+        <label for="room">Room:</label>
+        <input id="room" value="boris-galih" maxlength="40" />
+        <button id="joinBoris">I am Boris</button>
+        <button id="joinGalih">I am Galih</button>
+        <button id="reset" class="secondary">New Round</button>
+      </div>
+      <div id="status">Connecting to Firebase …</div>
+      <div class="small">
+        Controls: Arrow keys or WASD. The correct ball has a very subtle golden sparkle before reveal. After 10 seconds it becomes obvious. Lollipop = 20% speed boost for 8 seconds.
+      </div>
+    </section>
+    <section class="gameArea">
+      <canvas id="court" width="1080" height="650"></canvas>
+      <div id="winnerBox" class="overlay">
+        <div id="winnerText" class="winnerText">Winner</div>
+        <div class="winnerSub">Nice catch! Start a new round when you are ready.</div>
+        <button id="resetBig">New Round</button>
+      </div>
+      <div class="hudHint">Tip: the arena is bigger than the screen. Follow your player and hunt the real ball.</div>
+    </section>
+  </main>
+
+  <script type="module">
+    const firebaseConfig = {
+      apiKey: "AIzaSyAICAtSStQY1mNXdu7aov7uOFjcAXtzRLg",
+      authDomain: "game-18fa7.firebaseapp.com",
+      databaseURL: "https://game-18fa7-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "game-18fa7",
+      storageBucket: "game-18fa7.firebasestorage.app",
+      messagingSenderId: "852624891380",
+      appId: "1:852624891380:web:2d1f7547f22dd987846da1"
+    };
+
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js";
+    import { getDatabase, ref, set, get, update, onValue, onDisconnect, runTransaction } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js";
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getDatabase(app);
+
+    const VIEW_W = 1080, VIEW_H = 650;
+    const WORLD_W = 1560, WORLD_H = 930;
+    const PLAYER_R = 24, BALL_R = 17;
+    const PLAYER_SPEED = 320;
+    const BOOST_MULT = 1.2;
+    const BOOST_MS = 8000;
+    const REVEAL_MS = 10000;
+    const SEND_EVERY_MS = 35;
+
+    const canvas = document.getElementById("court");
+    const ctx = canvas.getContext("2d");
+    const statusEl = document.getElementById("status");
+    const roomInput = document.getElementById("room");
+    const winnerBox = document.getElementById("winnerBox");
+    const winnerText = document.getElementById("winnerText");
+
+    const keys = Object.create(null);
+    const names = { boris: "Boris", galih: "Galih" };
+    const spawns = { boris: { x: 250, y: WORLD_H / 2 }, galih: { x: WORLD_W - 250, y: WORLD_H / 2 } };
+
+    let uid = null;
+    let resolveAuthReady;
+    const authReady = new Promise(resolve => { resolveAuthReady = resolve; });
+    let currentRoom = null, localRole = null, playerRef = null, unsubscribeRoom = null;
+    let lastFrame = performance.now(), lastSend = 0, lastBallSend = 0;
+    let localPlayer = null;
+    let hostBall = null;
+    let state = { players: {}, ball: null, winner: null };
+    let camera = { x: 0, y: 0 };
+    let shake = 0;
+    let lastMessage = "";
+
+    function setStatus(text) { statusEl.textContent = text; lastMessage = text; }
+    function cleanRoomId(value) {
+      return (value || "boris-galih").trim().toLowerCase().replace(/[.#$\[\]\/]/g, "-").replace(/\s+/g, "-").slice(0, 40) || "boris-galih";
+    }
+    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+    function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+    function nowMs() { return Date.now(); }
+    function rand(min, max) { return min + Math.random() * (max - min); }
+
+    function firebaseArray(value) {
+      if (!value) return [];
+      if (Array.isArray(value)) return value;
+      return Object.keys(value).sort((a,b)=>Number(a)-Number(b)).map(k => value[k]);
+    }
+
+    function makeBall(i, correctIndex) {
+      const angle = rand(0, Math.PI * 2);
+      const speed = rand(235, 395);
+      return {
+        x: WORLD_W / 2 + (i - 1) * 82 + rand(-18, 18),
+        y: WORLD_H / 2 + rand(-76, 76),
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        r: BALL_R,
+        spin: rand(0, Math.PI * 2),
+        nextTurnAt: nowMs() + rand(240, 840),
+        id: i
+      };
+    }
+
+    function newRoundBallState() {
+      const correctIndex = Math.floor(Math.random() * 3);
+      const balls = [0,1,2].map(i => makeBall(i, correctIndex));
+      const anchor = balls[0];
+      return {
+        x: anchor.x, y: anchor.y, vx: anchor.vx, vy: anchor.vy, r: BALL_R,
+        balls,
+        correctIndex,
+        roundStart: nowMs(),
+        revealAt: nowMs() + REVEAL_MS,
+        roundId: Math.random().toString(36).slice(2, 9),
+        powerup: makePowerup(nowMs() + rand(2600, 5600), false)
+      };
+    }
+
+    function randomizeBallVelocity(ball, strong = false) {
+      const angle = Math.atan2(ball.vy, ball.vx) + rand(-1.45, 1.45) + (strong ? rand(-.8, .8) : 0);
+      const speed = rand(250, strong ? 455 : 390);
+      ball.vx = Math.cos(angle) * speed;
+      ball.vy = Math.sin(angle) * speed;
+      ball.nextTurnAt = nowMs() + rand(220, 780);
+    }
+
+    function makePowerup(spawnAt = nowMs() + rand(4000, 8500), active = false) {
+      return {
+        active,
+        spawnAt,
+        x: rand(160, WORLD_W - 160),
+        y: rand(150, WORLD_H - 150),
+        takenBy: "",
+        takenAt: 0
+      };
+    }
+
+    async function resetRound() {
+      const room = cleanRoomId(roomInput.value);
+      const freshBall = newRoundBallState();
+      await update(ref(db, `rooms/${room}`), { winner: null, ball: freshBall, createdAt: Date.now() });
+      winnerBox.classList.remove("show");
+      setStatus("New round started. Find the real basketball!");
+      shake = 0;
+    }
+
+    async function join(role) {
+      await authReady;
+      const room = cleanRoomId(roomInput.value);
+      roomInput.value = room;
+      currentRoom = room;
+      localRole = role;
+
+      if (unsubscribeRoom) unsubscribeRoom();
+      playerRef = ref(db, `rooms/${room}/players/${role}`);
+      const snap = await get(playerRef);
+      if (snap.exists() && snap.val().online && snap.val().uid !== uid) {
+        setStatus(`${names[role]} is already taken in this room.`);
+        localRole = null;
+        return;
+      }
+
+      const spawn = spawns[role];
+      localPlayer = { uid, name: names[role], x: spawn.x, y: spawn.y, online: true, boostUntil: 0 };
+      await set(playerRef, localPlayer);
+      onDisconnect(playerRef).update({ online: false });
+
+      const roomRef = ref(db, `rooms/${room}`);
+      unsubscribeRoom = onValue(roomRef, snapshot => {
+        const data = snapshot.val() || {};
+        state.players = data.players || {};
+        state.ball = data.ball || null;
+        state.winner = data.winner || null;
+        if (!state.ball) resetRound();
+        if (state.winner) {
+          winnerText.textContent = `${state.winner.name} Winner`;
+          winnerBox.classList.add("show");
+        } else {
+          winnerBox.classList.remove("show");
+        }
+      });
+
+      if (role === "boris") {
+        setStatus("You are Boris. Host mode active. Catch the correct ball!");
+        const roomSnap = await get(ref(db, `rooms/${room}/ball`));
+        if (!roomSnap.exists()) await resetRound();
+      } else {
+        setStatus("You are Galih. Catch the correct ball!");
+      }
+    }
+
+    function currentSpeed(role) {
+      const p = state.players?.[role];
+      const boostUntil = p?.boostUntil || 0;
+      return PLAYER_SPEED * (boostUntil > nowMs() ? BOOST_MULT : 1);
+    }
+
+    function moveLocal(dt) {
+      if (!localPlayer || !localRole || state.winner) return;
+      let dx = 0, dy = 0;
+      if (keys.ArrowLeft || keys.a) dx -= 1;
+      if (keys.ArrowRight || keys.d) dx += 1;
+      if (keys.ArrowUp || keys.w) dy -= 1;
+      if (keys.ArrowDown || keys.s) dy += 1;
+      if (dx || dy) {
+        const len = Math.hypot(dx, dy);
+        const speed = currentSpeed(localRole);
+        localPlayer.x = clamp(localPlayer.x + (dx / len) * speed * dt, 72, WORLD_W - 72);
+        localPlayer.y = clamp(localPlayer.y + (dy / len) * speed * dt, 82, WORLD_H - 72);
+      }
+      const t = performance.now();
+      if (t - lastSend > SEND_EVERY_MS) {
+        lastSend = t;
+        update(playerRef, { x: localPlayer.x, y: localPlayer.y, online: true, name: names[localRole], uid, boostUntil: state.players?.[localRole]?.boostUntil || 0 });
+      }
+    }
+
+    function updateHostBall(dt) {
+      if (localRole !== "boris" || !state.ball || state.winner) return;
+      const bState = structuredClone(state.ball);
+      const balls = firebaseArray(bState.balls);
+      if (balls.length < 3) return;
+      const tNow = nowMs();
+      for (const b of balls) {
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        b.spin = (b.spin || 0) + (Math.hypot(b.vx, b.vy) * dt / 30);
+        if (b.x < 78 || b.x > WORLD_W - 78) { b.vx *= -1; b.x = clamp(b.x, 78, WORLD_W - 78); randomizeBallVelocity(b, true); }
+        if (b.y < 88 || b.y > WORLD_H - 78) { b.vy *= -1; b.y = clamp(b.y, 88, WORLD_H - 78); randomizeBallVelocity(b, true); }
+        if (tNow > (b.nextTurnAt || 0)) randomizeBallVelocity(b);
+      }
+
+      let power = bState.powerup || makePowerup();
+      if (!power.active && tNow > (power.spawnAt || 0)) {
+        power = makePowerup(tNow, true);
+        power.active = true;
+      }
+      if (power.takenAt && tNow - power.takenAt > 9500) power = makePowerup(tNow + rand(3200, 7600), false);
+
+      bState.balls = balls;
+      bState.powerup = power;
+      bState.x = balls[0].x; bState.y = balls[0].y; bState.vx = balls[0].vx; bState.vy = balls[0].vy; bState.r = BALL_R;
+      hostBall = bState;
+
+      const nowPerf = performance.now();
+      if (nowPerf - lastBallSend > 45) {
+        lastBallSend = nowPerf;
+        update(ref(db, `rooms/${currentRoom}/ball`), bState);
+      }
+    }
+
+    async function tryPowerup() {
+      if (!localRole || !state.ball || state.winner) return;
+      const p = state.players?.[localRole];
+      const power = state.ball.powerup;
+      if (!p || !power || !power.active || power.takenBy) return;
+      if (Math.hypot(p.x - power.x, p.y - power.y) < 52) {
+        const ballRef = ref(db, `rooms/${currentRoom}/ball/powerup`);
+        const result = await runTransaction(ballRef, current => {
+          if (!current || !current.active || current.takenBy) return current;
+          return { ...current, active: false, takenBy: localRole, takenAt: nowMs() };
+        });
+        if (result.committed) {
+          await update(ref(db, `rooms/${currentRoom}/players/${localRole}`), { boostUntil: nowMs() + BOOST_MS });
+          setStatus(`${names[localRole]} got the lollipop speed boost!`);
+          shake = 5;
+        }
+      }
+    }
+
+    async function tryWinOrFake() {
+      if (!localRole || !state.ball || state.winner) return;
+      const p = state.players?.[localRole];
+      if (!p) return;
+      const balls = firebaseArray(state.ball.balls);
+      const correct = Number(state.ball.correctIndex || 0);
+      for (let i = 0; i < balls.length; i++) {
+        const b = balls[i];
+        if (Math.hypot(p.x - b.x, p.y - b.y) < PLAYER_R + BALL_R - 1) {
+          if (i === correct) {
+            const winnerRef = ref(db, `rooms/${currentRoom}/winner`);
+            await runTransaction(winnerRef, current => current || { role: localRole, name: names[localRole], time: Date.now() });
+            shake = 12;
+          } else {
+            setStatus("Fake ball! Keep hunting the real one.");
+            shake = 7;
+            if (localRole === "boris" && hostBall?.balls?.[i]) randomizeBallVelocity(hostBall.balls[i], true);
+          }
+          break;
+        }
+      }
+    }
+
+    function updateCamera(dt) {
+      const target = localRole && state.players?.[localRole] ? state.players[localRole] : { x: WORLD_W / 2, y: WORLD_H / 2 };
+      const tx = clamp(target.x - VIEW_W / 2, 0, WORLD_W - VIEW_W);
+      const ty = clamp(target.y - VIEW_H / 2, 0, WORLD_H - VIEW_H);
+      camera.x += (tx - camera.x) * Math.min(1, dt * 7.5);
+      camera.y += (ty - camera.y) * Math.min(1, dt * 7.5);
+      shake = Math.max(0, shake - dt * 20);
+    }
+
+    function worldToViewX(x) { return x - camera.x; }
+    function worldToViewY(y) { return y - camera.y; }
+
+    function drawCourt() {
+      const sx = shake ? rand(-shake, shake) : 0;
+      const sy = shake ? rand(-shake, shake) : 0;
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.clearRect(-20, -20, VIEW_W + 40, VIEW_H + 40);
+      const x0 = -camera.x, y0 = -camera.y;
+      const grd = ctx.createLinearGradient(0, 0, 0, VIEW_H);
+      grd.addColorStop(0, "#c87937"); grd.addColorStop(.5, "#b9662f"); grd.addColorStop(1, "#9f5428");
+      ctx.fillStyle = grd; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+      // wood floor planks
+      for (let y = Math.floor(camera.y / 54) * 54; y < camera.y + VIEW_H + 54; y += 54) {
+        ctx.fillStyle = ((y / 54) % 2 === 0) ? "rgba(255,220,150,.07)" : "rgba(60,25,8,.05)";
+        ctx.fillRect(0, y - camera.y, VIEW_W, 54);
+      }
+      for (let x = Math.floor(camera.x / 88) * 88; x < camera.x + VIEW_W + 88; x += 88) {
+        ctx.strokeStyle = "rgba(80,35,10,.16)"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x - camera.x, 0); ctx.lineTo(x - camera.x, VIEW_H); ctx.stroke();
+      }
+
+      ctx.save(); ctx.translate(x0, y0);
+      // outer court and lines
+      ctx.strokeStyle = "rgba(255,255,255,.78)"; ctx.lineWidth = 5;
+      roundRect(ctx, 45, 45, WORLD_W - 90, WORLD_H - 90, 30); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(WORLD_W/2, 45); ctx.lineTo(WORLD_W/2, WORLD_H - 45); ctx.stroke();
+      ctx.beginPath(); ctx.arc(WORLD_W/2, WORLD_H/2, 125, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(WORLD_W/2, WORLD_H/2, 18, 0, Math.PI*2); ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fill();
+      drawHoopSide(0); drawHoopSide(1);
+
+      // arena light dots / crowd
+      for (let i=0; i<34; i++) {
+        const px = 35 + i * 46;
+        ctx.fillStyle = i % 3 === 0 ? "rgba(68,204,255,.16)" : "rgba(255,255,255,.11)";
+        ctx.beginPath(); ctx.arc(px, 22, 9 + (i%2)*4, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(px, WORLD_H - 22, 8 + (i%2)*4, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
+      ctx.restore();
+    }
+
+    function drawHoopSide(side) {
+      const left = side === 0;
+      const x = left ? 72 : WORLD_W - 72;
+      const y = WORLD_H / 2;
+      ctx.strokeStyle = "rgba(20,40,55,.88)"; ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.moveTo(x, y-60); ctx.lineTo(x, y+60); ctx.stroke();
+      ctx.strokeStyle = "#ffefc2"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(left ? x+22 : x-22, y, 30, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = "rgba(255,70,50,.75)";
+      ctx.fillRect(left ? x+4 : x-44, y-28, 18, 56);
+    }
+
+    function roundRect(c, x, y, w, h, r) {
+      c.beginPath(); c.moveTo(x+r, y); c.arcTo(x+w, y, x+w, y+h, r); c.arcTo(x+w, y+h, x, y+h, r); c.arcTo(x, y+h, x, y, r); c.arcTo(x, y, x+w, y, r); c.closePath();
+    }
+
+    function drawBalls() {
+      if (!state.ball) return;
+      const balls = firebaseArray(state.ball.balls);
+      const correct = Number(state.ball.correctIndex || 0);
+      const revealed = nowMs() >= Number(state.ball.revealAt || 0);
+      balls.forEach((b, i) => drawBasketball(b, i === correct, revealed, i));
+    }
+
+    function drawBasketball(b, isCorrect, revealed, index) {
+      const x = worldToViewX(b.x), y = worldToViewY(b.y), r = b.r || BALL_R;
+      const pulse = Math.sin(performance.now()/180 + index) * 0.5 + 0.5;
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(b.spin || 0);
+      if (revealed && isCorrect) {
+        ctx.strokeStyle = `rgba(70,255,138,${.55 + pulse*.35})`; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.arc(0,0,r+13+pulse*4,0,Math.PI*2); ctx.stroke();
+      } else if (isCorrect) {
+        ctx.strokeStyle = `rgba(255,230,95,${.20 + pulse*.18})`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0,0,r+5,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.fillStyle = "#d97821"; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle = "#3b1908"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-r,0); ctx.lineTo(r,0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0,-r); ctx.lineTo(0,r); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-r*0.55,0,r*0.9,-1.15,1.15); ctx.stroke();
+      ctx.beginPath(); ctx.arc(r*0.55,0,r*0.9,Math.PI-1.15,Math.PI+1.15); ctx.stroke();
+      if (revealed && !isCorrect) {
+        ctx.fillStyle = "rgba(0,0,0,.25)"; ctx.beginPath(); ctx.arc(0,0,r+1,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(-r*.55,-r*.55); ctx.lineTo(r*.55,r*.55); ctx.moveTo(r*.55,-r*.55); ctx.lineTo(-r*.55,r*.55); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawPowerup() {
+      const p = state.ball?.powerup;
+      if (!p || !p.active || p.takenBy) return;
+      const x = worldToViewX(p.x), y = worldToViewY(p.y);
+      const bob = Math.sin(performance.now()/180) * 5;
+      ctx.save(); ctx.translate(x, y + bob);
+      ctx.shadowColor = "rgba(255, 80, 180, .75)"; ctx.shadowBlur = 18;
+      ctx.strokeStyle = "#f8f1d4"; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(8, 12); ctx.lineTo(24, 38); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "#ff58b6"; ctx.beginPath(); ctx.arc(0, 0, 19, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = "#fff4fe"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, 11, .2, Math.PI*1.65); ctx.stroke();
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(-5, -17, 6, 10); ctx.fillStyle = "#7d1f9a"; ctx.fillRect(5, 8, 6, 8);
+      ctx.restore();
+    }
+
+    function drawPlayers() {
+      const players = state.players || {};
+      drawPlayer(players.boris, "boris");
+      drawPlayer(players.galih, "galih");
+    }
+
+    function drawPlayer(p, role) {
+      if (!p || !p.online) return;
+      const x = worldToViewX(p.x), y = worldToViewY(p.y);
+      const moving = role === localRole && (keys.ArrowLeft || keys.ArrowRight || keys.ArrowUp || keys.ArrowDown || keys.a || keys.d || keys.w || keys.s);
+      const step = moving ? Math.sin(performance.now()/90) * 4 : 0;
+      const boosted = (p.boostUntil || 0) > nowMs();
+      ctx.save(); ctx.translate(x, y);
+      ctx.fillStyle = "rgba(0,0,0,.28)"; ctx.beginPath(); ctx.ellipse(0, 25, 28, 11, 0, 0, Math.PI*2); ctx.fill();
+      if (boosted) {
+        ctx.strokeStyle = "rgba(255, 90, 190, .75)"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 1, 43 + Math.sin(performance.now()/90)*3, 0, Math.PI*2); ctx.stroke();
+      }
+      if (role === "boris") drawBoris(step); else drawGalih(step);
+      ctx.font = "900 16px system-ui"; ctx.textAlign = "center"; ctx.lineWidth = 4; ctx.strokeStyle = "#071018"; ctx.strokeText(names[role], 0, -58); ctx.fillStyle = "#fff"; ctx.fillText(names[role], 0, -58);
+      ctx.restore();
+    }
+
+    function pxRect(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); }
+    function drawBoris(step) {
+      // legs and shoes
+      pxRect(-17, 16, 12, 28 + step, "#d9c08a"); pxRect(6, 16, 12, 28 - step, "#d9c08a");
+      pxRect(-22, 43 + step, 22, 8, "#101a28"); pxRect(3, 43 - step, 22, 8, "#101a28");
+      // shirt/jacket
+      pxRect(-24, -18, 48, 39, "#071a38"); pxRect(-13, -16, 26, 37, "#f0eadc"); pxRect(-28, -13, 10, 31, "#092b5e"); pxRect(18, -13, 10, 31, "#092b5e");
+      // neck/head
+      pxRect(-7, -28, 14, 12, "#f1a56e"); pxRect(-23, -54, 46, 34, "#f3b07a");
+      // hair
+      pxRect(-25, -61, 50, 12, "#4d2718"); pxRect(-18, -67, 33, 9, "#402014"); pxRect(13, -55, 13, 12, "#402014");
+      // glasses and face
+      pxRect(-17, -43, 13, 9, "#111"); pxRect(5, -43, 13, 9, "#111"); pxRect(-4, -40, 8, 3, "#111"); pxRect(-13, -40, 5, 4, "#dcefff"); pxRect(9, -40, 5, 4, "#dcefff");
+      pxRect(-4, -31, 12, 3, "#8d2d2a"); pxRect(-26, -46, 5, 12, "#ee9b69"); pxRect(21, -46, 5, 12, "#ee9b69");
+    }
+    function drawGalih(step) {
+      // long hair behind
+      pxRect(-31, -55, 62, 67, "#10131d"); pxRect(-39, -34, 14, 51, "#111827"); pxRect(25, -34, 14, 51, "#111827");
+      // legs and shoes
+      pxRect(-15, 18, 11, 26 + step, "#f0a568"); pxRect(6, 18, 11, 26 - step, "#f0a568");
+      pxRect(-22, 43 + step, 22, 8, "#0e1725"); pxRect(3, 43 - step, 22, 8, "#0e1725");
+      // clothes
+      pxRect(-24, -11, 48, 36, "#101826"); pxRect(-29, -7, 10, 28, "#1a2638"); pxRect(19, -7, 10, 28, "#1a2638");
+      // scarf
+      pxRect(-27, -22, 54, 15, "#f7f7ef"); pxRect(8, -11, 16, 28, "#f7f7ef");
+      // head and hair front
+      pxRect(-22, -52, 44, 35, "#eea565"); pxRect(-27, -55, 20, 21, "#111827"); pxRect(10, -55, 18, 21, "#111827"); pxRect(-31, -43, 10, 26, "#111827"); pxRect(21, -43, 10, 26, "#111827");
+      // face
+      pxRect(-13, -39, 7, 8, "#10131d"); pxRect(7, -39, 7, 8, "#10131d"); pxRect(-10, -25, 21, 4, "#fff"); pxRect(-13, -22, 23, 3, "#d34260"); pxRect(-1, -32, 4, 3, "#d78552");
+    }
+
+    function drawHud() {
+      ctx.save();
+      ctx.font = "900 22px system-ui"; ctx.textAlign = "left";
+      const revealAt = Number(state.ball?.revealAt || 0);
+      const remaining = Math.max(0, Math.ceil((revealAt - nowMs()) / 1000));
+      const text = remaining > 0 ? `Real ball reveal: ${remaining}s` : "Real ball revealed!";
+      drawPill(18, 16, 260, 44, text, remaining > 0 ? "#ffe385" : "#82ffb2");
+      if (localRole && state.players?.[localRole]?.boostUntil > nowMs()) {
+        const boostLeft = Math.ceil((state.players[localRole].boostUntil - nowMs()) / 1000);
+        drawPill(18, 68, 205, 40, `Lollipop boost: ${boostLeft}s`, "#ff8bd0");
+      }
+      const miniW = 190, miniH = 112, mx = VIEW_W - miniW - 18, my = 18;
+      ctx.fillStyle = "rgba(3,13,22,.58)"; roundRect(ctx, mx, my, miniW, miniH, 14); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 2; ctx.stroke();
+      for (const [role,p] of Object.entries(state.players || {})) if (p?.online) {
+        ctx.fillStyle = role === "boris" ? "#7bc1ff" : "#ff90cc";
+        ctx.beginPath(); ctx.arc(mx + p.x/WORLD_W*miniW, my + p.y/WORLD_H*miniH, 5, 0, Math.PI*2); ctx.fill();
+      }
+      const balls = firebaseArray(state.ball?.balls); balls.forEach((b,i)=>{ ctx.fillStyle = i === Number(state.ball.correctIndex) && nowMs() >= state.ball.revealAt ? "#8dff9f" : "#e18837"; ctx.beginPath(); ctx.arc(mx + b.x/WORLD_W*miniW, my + b.y/WORLD_H*miniH, 4,0,Math.PI*2); ctx.fill(); });
+      ctx.restore();
+    }
+    function drawPill(x,y,w,h,text,color) {
+      ctx.fillStyle = "rgba(4,14,24,.68)"; roundRect(ctx, x, y, w, h, h/2); ctx.fill();
+      ctx.fillStyle = color; ctx.font = "900 18px system-ui"; ctx.textAlign = "left"; ctx.fillText(text, x+18, y+28);
+    }
+
+    function draw() {
+      drawCourt();
+      drawPowerup();
+      drawBalls();
+      drawPlayers();
+      drawHud();
+    }
+
+    function loop(t) {
+      const dt = Math.min(0.033, (t - lastFrame) / 1000 || 0.016);
+      lastFrame = t;
+      moveLocal(dt);
+      updateHostBall(dt);
+      tryPowerup();
+      tryWinOrFake();
+      updateCamera(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    document.getElementById("joinBoris").addEventListener("click", () => join("boris"));
+    document.getElementById("joinGalih").addEventListener("click", () => join("galih"));
+    document.getElementById("reset").addEventListener("click", resetRound);
+    document.getElementById("resetBig").addEventListener("click", resetRound);
+    window.addEventListener("keydown", e => {
+      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) e.preventDefault();
+      keys[e.key] = true; keys[e.key.toLowerCase()] = true;
+    }, { passive: false });
+    window.addEventListener("keyup", e => { keys[e.key] = false; keys[e.key.toLowerCase()] = false; });
+
+    onAuthStateChanged(auth, user => {
+      if (user) { uid = user.uid; setStatus("Connected. Choose your role."); resolveAuthReady(); }
+    });
+    signInAnonymously(auth).catch(err => setStatus("Firebase login failed: " + err.message));
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
